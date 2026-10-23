@@ -58,6 +58,10 @@ Change the port with `PORT=3000 node server.js`.
 | Admin | admin@codelab.local | Admin@2026 |
 | Faculty | faculty@codelab.local | Faculty@2026 |
 | Student | student@codelab.local | Student@2026 |
+| Online program admin (`/c/online`) | program@codelab.local | Program@2026 |
+| Online learner, awaiting payment (`/c/online`) | learner@codelab.local | Learner@2026 |
+
+It also creates **CodeLab Online Academy** (`/c/online`), an open online certificate program: anyone can register at `/register` (see section 3b).
 
 Change these passwords (My account) or remove the accounts before real use. Running `--demo` again resets them to these passwords.
 
@@ -83,9 +87,29 @@ Billing itself (invoices, payments) is done outside CodeLab; record the billing 
 
 CodeLab shows a **temporary password** for each new account (and lets you download them as a CSV). Share the sign-in address and temporary password privately. At first sign-in each person must choose their own password.
 
+### Students create their own accounts (class codes)
+
+Faculty or the admin can let students sign up themselves instead of creating every account. On the **Students** page, under **Class codes**, choose a section, how long the code works (7, 14, 30 or 90 days, or no end date) and an optional maximum number of students, then click **Create class code**. Share the code (for example `K4DL-GJRF`), the link (**Copy link**, e.g. `https://your-site/join/K4DL-GJRF`) or a printed sheet (**Print**).
+
+Students open **Join a class** on the front page (or the link), enter the code, their name, college email and a password of their choice, and go straight to **My assignments**, placed in the code's section. Self sign-ups count toward the college's student limit, show "Signed up with code …" in the roster, and can be deactivated like any other student. Turn a code off when the class has joined.
+
 ### Teams for group activities
 
 Group activities (the three Billing activities, or any activity where faculty tick **Group activity**) are done in teams. On the **Students** page, give each student a team name, include a fourth **Team** column in the class-list CSV (`Name, Email, Section, Team`), or use **Make teams** to split a section into teams of 2-6. For a group activity, one member uploads the team's document and it appears as submitted for every member; codes entered in the EHR Coding activity are shared the same way. On the grading page, **Give this grade and feedback to all of Team X** grades every member at once. Students without a team can still submit on their own.
+
+## 3b. Online certificate program (independent learners, paid registration)
+
+A college can run an **online certificate program** that anyone can join without a college: learners register themselves, pay a fee (default **10 USD**), complete the course practicals and receive a certificate. Payments and certificates are confirmed **by hand** by the program staff. The owner creates such a college by ticking **Run an online certificate program** in **Add a college** (the demo creates one at `/c/online`). Only one college should have registration open; the front page then shows a **Get certified** button and a program section.
+
+| Step | Learner | Program staff (admin or faculty) |
+|---|---|---|
+| 1. Register | Front page → **Get certified** (or `/register`): name as it should appear on the certificate, email, phone, country, password | |
+| 2. Pay | **Registration & payment**: reads the payment instructions (and online payment link, if set), pays, uploads the receipt (PDF/PNG/JPG) with the transaction reference | **Registrations** → **Receipts to check**: download the receipt, check it against the bank/payment account, then **Approve** or **Reject** (with a note the learner sees). A rejected learner can upload a new receipt. |
+| 3. Practicals | Only after approval, **My practicals** appears: download the sheet, work in the EHR and Coding activity, **upload the completed sheet** | Grades as usual (**Assigned work → Review**). Every activity assigned to *All students* is a course practical; the due date is optional. |
+| 4. Pass | Each practical needs the pass mark (default 70%). Below it, the practical shows **Not passed: resubmit** and the learner can correct and submit again (the earlier attempt is kept in the history). | Grades the new attempt. |
+| 5. Certificate | **Progress & certificate** shows every practical and, once issued, **Download certificate** | **Certificates**: learners who passed every practical are **Eligible**. **Print template** makes a ready-made certificate (save it as PDF), **Upload PDF**, check the number, then **Issue** (or **Withdraw**). |
+
+The admin sets the title, fee, currency, pass mark, payment instructions, payment link (must start with `https://`), and certificate note in **Program settings**, and can close registration there. Learners waiting for approval see nothing but their registration page: no practicals, EHR records or answer keys.
 
 ### Guest accounts for clients or visitors
 

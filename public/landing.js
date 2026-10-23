@@ -22,12 +22,20 @@ const LP_STEPS = [
 function lpNav(signIn = true) {
   const n = S.site.siteName || 'CodeLab';
   return `<header class="lp-nav"><div class="lp-in"><a class="lp-brand" href="/"><span class="brand-mark">${MARK_SVG}</span><b>${esc(n)}</b><span>ICD-10 Coding Practicum</span></a>
-    <nav aria-label="Front page"><a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#roles">Who it is for</a><a href="/#library">Activities</a>${signIn ? '<a class="btn primary sm" href="#signin" data-act="lp-signin">Sign in</a>' : ''}</nav></div></header>`;
+    <nav aria-label="Front page"><a href="/#features">Features</a><a href="/#how">How it works</a><a href="/#roles">Who it is for</a><a href="/#library">Activities</a><a href="/join">Join a class</a>${S.pubProgram?.open ? '<a href="/register"><b>Get certified</b></a>' : ''}${signIn ? '<a class="btn primary sm" href="#signin" data-act="lp-signin">Sign in</a>' : ''}</nav></div></header>`;
 }
 const lpFoot = () => `<footer class="lp-foot"><div class="lp-in"><div><b>${esc(S.site.siteName || 'CodeLab')}</b><span>ICD-10 coding practicum for Health Information Management programs.</span></div>
   <div class="small">All patient records are fictional and for education only. ICD-10-CM data: CDC/NCHS Tabular List, FY2026 (April 1, 2026 release).</div></div></footer>`;
 
-VIEWS.landing = () => `<div class="lp">${lpNav()}
+const lpProgram = () => { const pr = S.pubProgram; if (!pr?.open) return '';
+  const st = [['Register online', 'No college needed. Create your own account in a minute.'], ['Pay ' + pr.fee + ' ' + pr.currency, 'Pay the one-time fee and upload your receipt. We confirm it and open your practicals.'], ['Do the practicals', `${pr.practicals} hands-on coding practicals in the EHR. Upload your completed sheet for each one.`], ['Get your certificate', `Pass every practical with ${pr.passMark}% or more (resubmit any you miss) and download your certificate.`]];
+  return `<section class="lp-band lp-program" id="program"><div class="lp-in">
+    <div class="lp-head"><span class="lp-eyebrow">Online certificate program · open to everyone</span><h2>${esc(pr.title)}</h2><p>${esc(pr.summary)}</p></div>
+    <ol class="lp-steps">${st.map(([t, d], i) => `<li><span class="lp-num">${i + 1}</span><h3>${esc(t)}</h3><p>${esc(d)}</p></li>`).join('')}</ol>
+    <div class="row" style="justify-content:center;margin-top:24px"><a class="btn primary lg" href="/register">Register for ${esc(pr.fee + ' ' + pr.currency)}</a><a class="btn lg" href="#signin" data-act="lp-signin">Already registered? Sign in</a></div>
+  </div></section>`; };
+VIEWS.landing = () => { if (S.pubProgram === undefined) setTimeout(loadPubProgram); return lpLanding(); };
+const lpLanding = () => `<div class="lp">${lpNav()}
   <section class="lp-hero"><div class="lp-in lp-hero-grid">
     <div class="lp-hero-text"><span class="lp-eyebrow">For HIM and medical coding programs</span>
       <h1>Real coding practice in a real-feeling EHR.</h1>
@@ -37,6 +45,7 @@ VIEWS.landing = () => `<div class="lp">${lpNav()}
     <figure class="lp-shot lp-shot-hero"><div class="lp-shot-bar"><i></i><i></i><i></i><span>CodeLab EHR · Coding</span></div><img src="/img/ehr_coding.jpg" alt="The CodeLab EHR Coding activity: a coding summary with edits beside the ICD-10-CM code book" width="1280" height="800"></figure>
   </div></section>
 
+  ${lpProgram()}
   <section class="lp-band" id="features"><div class="lp-in">
     <div class="lp-head"><span class="lp-eyebrow">Features</span><h2>Everything a coding practicum needs, in one place</h2><p>No software to install for students. Faculty assign, students code, faculty grade.</p></div>
     <div class="lp-feat">${[
@@ -80,7 +89,8 @@ VIEWS.landing = () => `<div class="lp">${lpNav()}
   <section class="lp-band lp-signin-band" id="signin"><div class="lp-in lp-split">
     <div><span class="lp-eyebrow">Sign in</span><h2>Welcome back</h2>
       <p>Sign in with the email address and password your college gave you.</p>
-      <ol class="lp-mini">${[['New student?', 'Your faculty creates your account and gives you a temporary password.'], ['New faculty member?', 'Your college admin creates your account.'], ['New college?', 'Contact your CodeLab provider to set up your college and its admin account.']].map(([t, d]) => `<li><b>${t}</b> ${d}</li>`).join('')}</ol></div>
+      <a class="btn lg lp-join-btn" href="/join">New student? Create your account with a class code</a>
+      <ol class="lp-mini">${[...(S.pubProgram?.open ? [['Independent learner?', 'Register yourself for the online certificate program at <a href="/register">Get certified</a>. No college needed.']] : []), ['New student?', 'Get a class code from your faculty and create your own account at Join a class, or use the temporary password your faculty gave you.'], ['New faculty member?', 'Your college admin creates your account.'], ['New college?', 'Contact your CodeLab provider to set up your college and its admin account.']].map(([t, d]) => `<li><b>${t}</b> ${d}</li>`).join('')}</ol></div>
     <div class="lp-form panel panel-pad">${LP_LOGIN_FORM()}</div>
   </div></section>
   ${lpFoot()}</div>`;
@@ -97,8 +107,9 @@ VIEWS.collegeLogin = () => {
     <main class="lp-main"><div class="lp-main-in">
       <h2>Sign in to ${esc(org)}</h2><p class="muted">Use the email and password your college gave you.</p>
       ${LP_LOGIN_FORM()}
+      <a class="btn lp-wide lp-join-alt" href="/join">New student? Create your account with a class code</a>
       <div class="lp-help"><h3>First time here?</h3>
-        <dl><dt>Students</dt><dd>Your faculty creates your account and gives you a temporary password. After signing in you choose your own password, then you will see <b>My assignments</b>.</dd>
+        <dl><dt>Students</dt><dd>Use the class code from your faculty to create your own account, or sign in with the temporary password your faculty gave you. You will then see <b>My assignments</b>.</dd>
         <dt>Faculty</dt><dd>Your college admin creates your account. After signing in you can add students, assign activities and grade.</dd>
         <dt>Admins</dt><dd>Your CodeLab provider sends your first sign-in details. Set your college's look under <b>Appearance</b> and add faculty.</dd></dl></div>
     </div></main></div>`;
@@ -115,7 +126,36 @@ VIEWS.setup = () => `<div class="lp lp-college"><aside class="lp-side"><div clas
       <label class="field"><span>Password (at least 8 characters)</span><input type="password" id="su-pw" name="password" autocomplete="new-password" required></label>
       <button class="btn primary lp-wide" type="submit">Create owner account</button></form></div></main></div>`;
 
+VIEWS.join = () => {
+  const j = S.join || (S.join = {}); const info = j.info;
+  if (j.code && !j.checked && !info) { j.checked = true; setTimeout(() => joinCheck(j.code), 0); }
+  const steps = [['Get your class code', 'Your faculty gives you a code such as K7QM-4XRA, or a link that already contains it.'], ['Create your account', 'Enter your name, your college email and a password you choose (at least 8 characters).'], ['Open your assignments', 'You are placed in your class automatically. Assignments from your faculty appear under My assignments.'], ['Practice in the EHR', 'Open each assignment\'s patient record, code it in the Coding activity and submit your work.']];
+  const ok = info && info.ok;
+  return `<div class="lp lp-college">
+    <aside class="lp-side"><div class="lp-side-in"><a class="lp-side-brand" href="/"><span class="lp-logo mark">${MARK_SVG}</span><div><b>${esc(S.site.siteName || 'CodeLab')}</b><span>ICD-10 Coding Practicum</span></div></a>
+      <h1>Join your class</h1><p class="lp-lead">Create your student account in two minutes and start practicing coding in a hospital-style EHR.</p>
+      <ol class="lp-steps vertical">${steps.map(([t, d], i) => `<li><span class="lp-num">${i + 1}</span><div><h3>${t}</h3><p>${d}</p></div></li>`).join('')}</ol>
+      <p class="lp-side-foot">Already have an account? <a href="/#signin">Sign in</a></p></div></aside>
+    <main class="lp-main"><div class="lp-main-in">
+      ${ok ? `<div class="join-org">${info.logo ? `<img src="${esc(info.logo)}" alt="">` : `<span class="lp-logo mark sm">${MARK_SVG}</span>`}<div><b>${esc(info.college)}</b><span>${info.section ? 'Section ' + esc(info.section) : 'All students'} · Class code <span class="mono">${esc(j.code)}</span></span></div></div>
+        <h2>Create your student account</h2>
+        <form class="stack" data-form="join"><input type="hidden" name="code" value="${esc(j.code)}">
+          <label class="field"><span>Full name (as your college records it)</span><input type="text" id="jn-name" name="name" required autocomplete="name"></label>
+          <label class="field"><span>College email</span><input type="text" id="jn-email" name="email" required inputmode="email" autocomplete="email" placeholder="you@college.edu"></label>
+          <label class="field"><span>Choose a password (at least 8 characters)</span><input type="password" id="jn-pw" name="password" required autocomplete="new-password" minlength="8"></label>
+          <label class="field"><span>Repeat the password</span><input type="password" id="jn-pw2" name="repeat" required autocomplete="new-password" minlength="8"></label>
+          <button class="btn primary lp-wide" type="submit">Create my account</button>
+          <p class="hint">Your email becomes your username. Your faculty can see your name, email, submissions and grades. All patient records are fictional.</p>
+          <button class="btn sm" type="button" data-act="join-reset">Use a different class code</button></form>`
+      : `<h2>Enter your class code</h2><p class="muted">Your faculty gives you this code. It is 8 letters and numbers, for example K7QM-4XRA.</p>
+        <form class="stack" data-form="join-code"><label class="field"><span>Class code</span><input type="text" id="jn-code" name="code" value="${esc(j.code || '')}" required autocomplete="off" spellcheck="false" class="join-input" placeholder="XXXX-XXXX"></label>
+          ${j.err ? `<p class="join-err" role="alert">${esc(j.err)}</p>` : ''}
+          <button class="btn primary lp-wide" type="submit">Continue</button></form>
+        <div class="lp-help"><h3>No code?</h3><dl><dt>Students</dt><dd>Ask your faculty for your class code or sign-in details.</dd><dt>Faculty</dt><dd>Create class codes on the <b>Students</b> page after you sign in.</dd></dl></div>`}
+    </div></main></div>`;
+};
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-act="join-reset"]')) { S.join = { code: '', checked: true }; render(); return; }
   const el = e.target.closest('[data-act="lp-signin"]'); if (!el) return;
   e.preventDefault(); document.getElementById('signin')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); setTimeout(() => document.getElementById('li-email')?.focus({ preventScroll: true }), 450);
 });

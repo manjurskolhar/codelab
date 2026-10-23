@@ -771,3 +771,47 @@ input[type=password]:focus{border-color:var(--accent);outline:none;box-shadow:0 
 .lp-brand .brand-mark,.lp-logo.mark{display:grid!important;place-items:center;width:34px;height:34px;border-radius:8px;background:#0b2f4e!important;color:#fff!important;flex:none}
 .lp-logo.mark{width:52px;height:52px;background:rgba(255,255,255,.16)!important}
 .lp-brand .brand-mark svg,.lp-logo.mark svg{display:block}
+/* join a class */
+.lp-join-btn{margin:6px 0 18px;background:#fff;color:#0b2f4e!important;border-color:#fff;font-weight:600}
+.lp-join-alt{text-align:center;text-decoration:none;color:var(--lp-navy,#0b2f4e)!important}
+.join-org{display:flex;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--lp-line,#d6e0ea);border-radius:10px;background:#f5f9fd}
+.join-org img{width:44px;height:44px;object-fit:contain;border-radius:8px;background:#fff}
+.join-org b{display:block;font-size:1.05rem} .join-org span{font-size:.88rem;color:var(--muted)}
+.lp-logo.mark.sm{width:44px;height:44px;background:#0b2f4e!important}
+.join-input{font:600 1.4rem var(--font-mono)!important;letter-spacing:.12em;text-transform:uppercase;text-align:center}
+.join-err{background:var(--bad-soft);color:var(--bad);padding:8px 12px;border-radius:6px;font-size:.92rem}
+.join-code{font-size:1rem;letter-spacing:.06em}
+tr.hl td{background:var(--ok-soft)}
+.join-print{display:none}
+@media print{
+  body *{visibility:hidden} .join-print,.join-print *{visibility:visible}
+  .join-print{display:block;position:fixed;inset:0;padding:60px;text-align:center;background:#fff;color:#000}
+  .join-print h1{font-size:28px;margin-bottom:30px} .join-print p{font-size:18px;margin:10px 0}
+  .join-big{font:700 64px var(--font-mono);letter-spacing:.1em;border:4px solid #000;border-radius:16px;padding:20px 30px;display:inline-block;margin:20px 0}
+}
+
+/* ---------- online certificate program ---------- */
+.reg-price{display:flex;flex-direction:column;gap:2px;margin:14px 0 6px;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,.12)}
+.reg-price b{font-size:1.6rem}.reg-price span{font-size:.85rem;opacity:.85}
+.lp-steps.vertical{display:flex;flex-direction:column;gap:12px;grid-template-columns:none;margin-top:16px}
+.lp-steps.vertical li{display:flex;gap:12px;align-items:flex-start;background:none;border:0;padding:0;box-shadow:none}
+.lp-steps.vertical h3{margin:0 0 2px;font-size:.98rem}.lp-steps.vertical p{margin:0;font-size:.88rem;opacity:.85}
+.reg-status{border-left:4px solid var(--line,#ccc)}.reg-status.ok{border-left-color:#1a7f4b}.reg-status.warn{border-left-color:#b7791f}.reg-status.bad{border-left-color:#c53030}
+.reg-instr{white-space:pre-wrap;margin:0;padding:12px;border-radius:8px;background:var(--bg-soft,rgba(0,0,0,.04))}
+.cert-box{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;border-left:4px solid #1a7f4b}
+.cert-box.pending{border-left-color:#b7791f}.cert-box h2{margin:4px 0}
+.lp-program{background:linear-gradient(180deg,rgba(13,110,110,.06),transparent)}
+.cert-print{display:none}
+@media print{
+  body.printing-cert{background:#fff!important}
+  body.printing-cert *{visibility:hidden!important}
+  body.printing-cert .cert-print, body.printing-cert .cert-print *{visibility:visible!important}
+  body.printing-cert .cert-print{display:block!important;position:fixed;inset:0;background:#fff;z-index:9999}
+  @page{size:A4 landscape;margin:12mm}
+}
+.cert-frame{border:6px double #1f4e5a;padding:48px 56px;text-align:center;font-family:Georgia,'Times New Roman',serif;color:#1d2a30;min-height:170mm;box-sizing:border-box}
+.cert-org{font-size:15pt;letter-spacing:.12em;text-transform:uppercase;color:#1f4e5a}
+.cert-h{font-size:34pt;margin:18px 0 10px}.cert-name{font-size:28pt;font-style:italic;border-bottom:1px solid #999;display:inline-block;padding:0 40px 6px;margin:8px 0 12px}
+.cert-title{font-size:18pt;font-weight:bold;margin:6px 0 10px}.cert-frame p{font-size:12.5pt;margin:6px 0}
+.cert-foot{display:flex;justify-content:space-around;margin-top:46px}.cert-foot div{display:flex;flex-direction:column;min-width:180px;border-top:1px solid #555;padding-top:6px}
+.cert-foot span{font-size:12pt}.cert-foot small{font-size:9.5pt;color:#555}

@@ -48,7 +48,7 @@ const cols = (t) => q(`PRAGMA table_info(${t})`).all().map(c => c.name);
 const uid = (p = '') => p + crypto.randomBytes(8).toString('hex');
 const now = () => Date.now();
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-const RESERVED = ['api', 'ehr', 'codes', 'c', 'owner', 'admin', 'static', 'www', 'login', 'files'];
+const RESERVED = ['api', 'ehr', 'codes', 'join', 'register', 'online-program', 'c', 'owner', 'admin', 'static', 'www', 'login', 'files'];
 
 /* ---- upgrade a single-college database (earlier versions) to the multi-college layout ---- */
 (function migrate() {
@@ -90,6 +90,7 @@ const RESERVED = ['api', 'ehr', 'codes', 'c', 'owner', 'admin', 'static', 'www',
 })();
 
 if (!cols('users').includes('team')) db.exec("ALTER TABLE users ADD COLUMN team TEXT DEFAULT ''");
+if (!cols('users').includes('access')) db.exec("ALTER TABLE users ADD COLUMN access TEXT DEFAULT ''"); /* online program learners: pending | approved | rejected */
 
 /* passwords: scrypt */
 function hashPw(pw) { const salt = crypto.randomBytes(16); const h = crypto.scryptSync(pw, salt, 32); return `s1$${salt.toString('hex')}$${h.toString('hex')}`; }
@@ -186,14 +187,36 @@ if (process.argv[2] === '--demo') {
     putRec(id, 'settings', 'site', { theme: 'navy', custom: {}, siteName: 'CodeLab', institution: 'Demo College', logo: '', showName: true, logoTile: true, topbarHeight: 60, stripeWidth: 3, updatedAt: now() });
     seedOrg(id); org = getOrg(id);
   }
-  for (const [role, name, email, pw] of DEMO) {
-    const ex = q('SELECT id FROM users WHERE email=?').get(email);
+
+  /* demo online certificate program: independent learners register, pay, get approved, complete practicals, get a certificate */
+  let on = q("SELECT * FROM orgs WHERE slug='online'").get();
+  if (!on) {
+    const id = uid('o');
+    q('INSERT INTO orgs(id,slug,name,status,max_students,expires_at,contact,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id, 'online', 'CodeLab Online Academy', 'active', 0, null, '', 'Created by --demo', now());
+    putRec(id, 'settings', 'site', { theme: 'teal', custom: {}, siteName: 'CodeLab', institution: 'CodeLab Online Academy', logo: '', showName: true, logoTile: true, topbarHeight: 60, stripeWidth: 3, updatedAt: now() });
+    putRec(id, 'settings', 'program', { enabled: true, open: true, title: 'ICD-10 Coding Practicum Certificate', fee: '10', currency: 'USD', passMark: 70,
+      summary: 'Complete hands-on ICD-10 coding practicals in a hospital-style EHR and earn a certificate of completion.',
+      instructions: 'Pay the registration fee of 10 USD by bank transfer to: CodeLab Academy, IBAN SA00 0000 0000 0000 0000 0000 (demo details, replace with your own). Use your email address as the payment reference. Then upload a photo or PDF of the receipt below. Your practicals open when we confirm your payment, usually within 1 working day.',
+      link: '', certNote: 'Certificates are issued after every course practical is passed. You will be able to download your certificate here.' });
+    seedOrg(id); on = getOrg(id);
+  }
+  DEMO.push(['admin', 'Program Admin', 'program@codelab.local', 'Program@2026', on.id], ['student', 'Demo Learner', 'learner@codelab.local', 'Learner@2026', on.id]);
+  for (const [role, name, email, pw, orgId] of DEMO) {
+    const ex = q('SELECT id FROM users WHERE email=?').get(email); const target = role === 'owner' ? null : (orgId || org.id); const learner = orgId && role === 'student';
     if (ex) q('UPDATE users SET pw=?, must_change=0, active=1 WHERE id=?').run(hashPw(pw), ex.id);
-    else q('INSERT INTO users(id,name,email,role,section,pw,must_change,active,created_by,created_at,expires_at,org_id) VALUES(?,?,?,?,?,?,0,1,NULL,?,NULL,?)')
-      .run(uid('u'), name, email, role, role === 'student' ? 'A' : '', hashPw(pw), now(), role === 'owner' ? null : org.id);
+    else { const nid = uid('u'); q("INSERT INTO users(id,name,email,role,section,pw,must_change,active,created_by,created_at,expires_at,org_id,access) VALUES(?,?,?,?,?,?,0,1,NULL,?,NULL,?,?)")
+      .run(nid, name, email, role, role === 'student' ? (learner ? 'Online' : 'A') : '', hashPw(pw), now(), target, learner ? 'pending' : '');
+      if (learner) putRec(target, 'learner', nid, { phone: '', country: 'Saudi Arabia', registeredAt: now() }); }
+  }
+  /* the demo program's course: six practicals, self-paced (no due date) */
+  if (!Object.keys(getRecs(on.id, 'assignments')).length) {
+    const admin = q("SELECT id FROM users WHERE email='program@codelab.local'").get(); const lib = getRecs(on.id, 'library');
+    ['or1', 'or2', 'f1', 'f2', 'c1', 'c3'].forEach((k, i) => { const t = lib[k]; if (!t) return;
+      putRec(on.id, 'assignments', 'a' + uid(), { title: t.title, category: t.group || '', description: t.description || '', instructions: t.instructions || '', docs: t.docs, keyDocs: t.keyDocs || [], ehr: t.ehr, points: t.points || 100, due: '', target: 'all', templateId: k, createdAt: now() + i, createdBy: admin?.id }); });
   }
   console.log('Demo accounts ready (sign in at http://localhost:' + PORT + '/c/demo, or http://localhost:' + PORT + '/ for the owner):');
-  for (const [role, , email, pw] of DEMO) console.log(`  ${role.padEnd(8)} ${email.padEnd(24)} ${pw}`);
+  for (const [role, , email, pw, o] of DEMO) console.log(`  ${(o ? (role === 'admin' ? 'program admin' : 'learner') : role).padEnd(14)} ${email.padEnd(24)} ${pw}`);
+  console.log('Online program: register at http://localhost:' + PORT + '/register, staff sign in at http://localhost:' + PORT + '/c/online');
   console.log('Change these passwords (My account) or remove the accounts before real use.');
   process.exit(0);
 }
@@ -243,7 +266,7 @@ function currentUser(req) {
   if (u.role !== 'owner') { const o = getOrg(u.org_id); if (!o || o.status !== 'active') return null; }
   return u;
 }
-const pub = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, section: u.section || '', team: u.team || '', active: !!u.active, mustChange: !!u.must_change, createdBy: u.created_by, createdAt: u.created_at, expiresAt: u.expires_at || null });
+const pub = (u) => ({ id: u.id, name: u.name, email: u.email, role: u.role, section: u.section || '', team: u.team || '', access: u.access || '', active: !!u.active, mustChange: !!u.must_change, createdBy: u.created_by, createdAt: u.created_at, expiresAt: u.expires_at || null });
 const isStaff = (u) => u && (u.role === 'admin' || u.role === 'faculty');
 const need = (u, ...roles) => { if (!u) fail(401, 'Please sign in.'); if (roles.length && !roles.includes(u.role)) fail(403, 'You do not have permission to do that.'); if (u.must_change && roles.length) fail(403, 'Change your temporary password first.'); };
 const cleanEmail = (e) => String(e || '').trim().toLowerCase();
@@ -260,10 +283,22 @@ function seatCheck(org, adding = 1) {
 
 /* login throttle */
 const attempts = new Map();
-function throttle(key) { const a = attempts.get(key) || { n: 0, t: now() }; if (now() - a.t > 15 * 60e3) { a.n = 0; a.t = now(); } a.n++; attempts.set(key, a); if (a.n > 10) fail(429, 'Too many sign-in attempts. Try again in 15 minutes.'); }
+function throttle(key, limit = 10) { const a = attempts.get(key) || { n: 0, t: now() }; if (now() - a.t > 15 * 60e3) { a.n = 0; a.t = now(); } a.n++; attempts.set(key, a); if (a.n > limit) fail(429, 'Too many sign-in attempts. Try again in 15 minutes.'); }
 
 /* ------------------------------------------------------------------ visibility */
+/* ---- online certificate program (independent learners register and pay; staff approve, grade and certify) ---- */
+const PROGRAM_DEFAULT = { enabled: true, open: true, title: 'ICD-10 Coding Practicum Certificate', fee: '10', currency: 'USD', passMark: 70,
+  summary: 'Complete hands-on ICD-10 coding practicals in a hospital-style EHR and earn a certificate of completion.',
+  instructions: 'Pay the registration fee using the payment method below, then upload a photo or PDF of your receipt. Your access opens when we confirm your payment (usually within 1 working day).',
+  link: '', certNote: 'Certificates are issued after every course practical is passed. You will be able to download your certificate here.' };
+const programOf = (org) => { const p = org && getRec(org, 'settings', 'program'); return p && p.enabled ? { ...PROGRAM_DEFAULT, ...p } : null; };
+const blocked = (u) => u.role === 'student' && (u.access === 'pending' || u.access === 'rejected');
+function openProgram() {
+  for (const o of q("SELECT * FROM orgs WHERE status='active' ORDER BY created_at").all()) { const pr = programOf(o.id); if (pr && pr.open && !orgExpired(o)) return { o, pr }; }
+  return null;
+}
 function visibleAssignments(u) {
+  if (blocked(u)) return {};
   const all = getRecs(u.org_id, 'assignments');
   if (isStaff(u)) return all;
   return Object.fromEntries(Object.entries(all).filter(([, a]) => a.target === 'all' || a.target === u.section).map(([id, a]) => { const c = { ...a }; delete c.keyDocs; return [id, c]; }));
@@ -275,10 +310,12 @@ function orgInfo(o) {
 function bootstrap(u) {
   if (u.role === 'owner') return { me: pub(u), owner: true, orgs: ownerOrgs(), patients: {}, assignments: {}, faculty: {}, students: {}, library: {}, work: {}, grades: {} };
   const org = u.org_id;
-  const out = { me: pub(u), org: orgInfo(getOrg(org)), patients: getRecs(org, 'patients'), assignments: visibleAssignments(u), faculty: {}, students: {}, library: {}, work: {}, grades: {} };
+  const out = { me: pub(u), org: orgInfo(getOrg(org)), patients: blocked(u) ? {} : getRecs(org, 'patients'), assignments: visibleAssignments(u), faculty: {}, students: {}, library: {}, work: {}, grades: {} };
+  const pr = programOf(org); if (pr) { out.program = pr; if (isStaff(u)) out.learners = getRecs(org, 'learner'); else if (u.role === 'student') out.learner = getRec(org, 'learner', u.id) || {}; }
   if (isStaff(u)) {
     for (const x of q("SELECT * FROM users WHERE org_id=? AND role IN ('faculty','admin')").all(org)) out.faculty[x.id] = pub(x);
     for (const x of q("SELECT * FROM users WHERE org_id=? AND role='student'").all(org)) out.students[x.id] = pub(x);
+    out.joincodes = getRecs(org, 'joincodes');
     if (u.role === 'admin') { out.guests = {}; for (const x of q("SELECT * FROM users WHERE org_id=? AND role='guest'").all(org)) out.guests[x.id] = pub(x); }
     out.library = getRecs(org, 'library');
     for (const r of q('SELECT s.* FROM submissions s JOIN users x ON x.id=s.student_id WHERE x.org_id=?').all(org)) (out.work[r.student_id] ||= {})[r.assignment_id] = JSON.parse(r.data);
@@ -302,6 +339,7 @@ function canReadFile(u, f) {
   if (isStaff(u)) return true;
   if (f.kind === 'activity') return true;
   if (f.kind === 'submission' || f.kind === 'marked') return f.for_user === u.id || sameTeam(u, f.for_user);
+  if (f.kind === 'receipt' || f.kind === 'certificate') return f.for_user === u.id;
   return false; // answer keys
 }
 
@@ -345,6 +383,111 @@ route('POST', '/api/setup', async (req, res) => {
   q("INSERT INTO users(id,name,email,role,section,pw,must_change,active,created_by,created_at,org_id) VALUES(?,?,?,'owner','',?,0,1,NULL,?,NULL)").run(id, String(b.name).trim(), email, hashPw(b.password), now());
   setSession(res, id); json(res, 200, { ok: true });
 });
+/* ---- class join codes: students create their own account with a code from their faculty ---- */
+const JOIN_ALPHA = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const newJoinCode = () => { for (;;) { let c = ''; for (const x of crypto.randomBytes(8)) c += JOIN_ALPHA[x % JOIN_ALPHA.length]; c = c.slice(0, 4) + '-' + c.slice(4); if (!q("SELECT 1 FROM records WHERE kind='joincodes' AND id=?").get(c)) return c; } };
+const cleanCode = (c) => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2');
+function findJoin(code) {
+  const r = q("SELECT org, data FROM records WHERE kind='joincodes' AND id=?").get(cleanCode(code)); if (!r) return null;
+  const j = JSON.parse(r.data); const o = getOrg(r.org);
+  let why = '';
+  if (!o || o.status !== 'active') why = 'This college is not accepting sign-ups right now.';
+  else if (orgExpired(o)) why = "This college's subscription has ended. Ask your faculty.";
+  else if (!j.active) why = 'This class code has been turned off. Ask your faculty for a new one.';
+  else if (j.expiresAt && j.expiresAt <= now()) why = 'This class code has expired. Ask your faculty for a new one.';
+  else if (j.maxUses && (j.uses || 0) >= j.maxUses) why = 'This class code has been used the maximum number of times. Ask your faculty.';
+  return { org: o, j, code: cleanCode(code), why };
+}
+route('GET', '/api/join/:code', async (req, res, u, p) => {
+  throttle('joinlookup|' + (req.socket.remoteAddress || ''), 400);
+  const f = findJoin(p.code); if (!f) fail(404, 'That class code was not found. Check it with your faculty.');
+  const site = getRec(f.org.id, 'settings', 'site') || {};
+  json(res, 200, { college: f.org.name, slug: f.org.slug, section: f.j.section || '', logo: site.logo || '', ok: !f.why, why: f.why });
+});
+route('POST', '/api/join', async (req, res) => {
+  const b = await readJson(req); throttle('join|' + (req.socket.remoteAddress || ''), 150);
+  const f = findJoin(b.code); if (!f) fail(404, 'That class code was not found. Check it with your faculty.');
+  if (f.why) fail(403, f.why);
+  if (!pwOk(b.password)) fail(400, 'Choose a password of at least 8 characters.');
+  const creator = q('SELECT * FROM users WHERE id=?').get(f.j.createdBy) || q("SELECT * FROM users WHERE org_id=? AND role IN ('admin','faculty') ORDER BY created_at LIMIT 1").get(f.org.id);
+  if (!creator) fail(403, 'This college has no faculty yet.');
+  const r = createUser(creator, { name: b.name, email: b.email, role: 'student', section: f.j.section || '', team: f.j.team || '' }, f.org.id);
+  q('UPDATE users SET pw=?, must_change=0, created_by=? WHERE id=?').run(hashPw(b.password), 'join:' + f.code, r.user.id);
+  f.j.uses = (f.j.uses || 0) + 1; putRec(f.org.id, 'joincodes', f.code, f.j);
+  setSession(res, r.user.id); json(res, 200, { ok: true, slug: f.org.slug });
+});
+route('POST', '/api/joincodes', async (req, res, u) => {
+  need(u, 'admin', 'faculty'); const b = await readJson(req);
+  const days = Math.round(+b.days || 0); const maxUses = Math.max(0, Math.round(+b.maxUses || 0));
+  if (days < 0 || days > 365) fail(400, 'A code can last up to 365 days.');
+  const code = newJoinCode();
+  const j = { section: String(b.section || '').trim().slice(0, 60), team: '', label: String(b.label || '').trim().slice(0, 80), active: true, uses: 0, maxUses,
+    expiresAt: days ? now() + days * DAY : null, createdBy: u.id, createdAt: now() };
+  putRec(u.org_id, 'joincodes', code, j); json(res, 200, { code, joincode: j });
+});
+route('PATCH', '/api/joincodes/:code', async (req, res, u, p) => {
+  need(u, 'admin', 'faculty'); const code = cleanCode(p.code); const j = getRec(u.org_id, 'joincodes', code); if (!j) fail(404, 'Code not found.');
+  const b = await readJson(req); if (b.active != null) j.active = !!b.active;
+  if (b.extendDays) { const d = Math.round(+b.extendDays); if (!(d >= 1 && d <= 365)) fail(400, 'Extend by 1 to 365 days.'); j.expiresAt = Math.max(now(), j.expiresAt || now()) + d * DAY; j.active = true; }
+  putRec(u.org_id, 'joincodes', code, j); json(res, 200, { joincode: j });
+});
+route('DELETE', '/api/joincodes/:code', async (req, res, u, p) => { need(u, 'admin', 'faculty'); delRec(u.org_id, 'joincodes', cleanCode(p.code)); json(res, 200, { ok: true }); });
+
+route('GET', '/api/program', async (req, res) => {
+  const op = openProgram(); if (!op) return json(res, 200, { open: false });
+  const n = Object.keys(getRecs(op.o.id, 'assignments')).length;
+  json(res, 200, { open: true, name: op.o.name, slug: op.o.slug, title: op.pr.title, fee: op.pr.fee, currency: op.pr.currency, summary: op.pr.summary, passMark: op.pr.passMark, practicals: n });
+});
+route('POST', '/api/register', async (req, res) => {
+  const b = await readJson(req); throttle('register|' + (req.socket.remoteAddress || ''), 60);
+  const op = openProgram(); if (!op) fail(403, 'Registration is closed at the moment.');
+  if (!pwOk(b.password)) fail(400, 'Choose a password of at least 8 characters.');
+  if (!b.agree) fail(400, 'Please accept the program terms.');
+  const creator = q("SELECT * FROM users WHERE org_id=? AND role='admin' ORDER BY created_at LIMIT 1").get(op.o.id);
+  if (!creator) fail(403, 'Registration is not available yet.');
+  const r = createUser(creator, { name: b.name, email: b.email, role: 'student', section: 'Online' }, op.o.id);
+  q("UPDATE users SET pw=?, must_change=0, created_by='register', access='pending' WHERE id=?").run(hashPw(b.password), r.user.id);
+  putRec(op.o.id, 'learner', r.user.id, { phone: String(b.phone || '').slice(0, 40), country: String(b.country || '').slice(0, 60), registeredAt: now() });
+  setSession(res, r.user.id); json(res, 200, { ok: true, slug: op.o.slug });
+});
+route('PUT', '/api/learner/receipt', async (req, res, u) => {
+  need(u, 'student'); if (!programOf(u.org_id)) fail(404, 'Not found.');
+  const b = await readJson(req); const f = q('SELECT * FROM files WHERE id=?').get(String(b.fileId || ''));
+  if (!f || f.kind !== 'receipt' || f.for_user !== u.id) fail(400, 'Upload your receipt first.');
+  const L = getRec(u.org_id, 'learner', u.id) || {};
+  L.receipt = { fid: f.id, name: f.name, size: f.size, at: f.created_at }; L.receiptAt = now(); L.payRef = String(b.payRef || '').slice(0, 120);
+  if (u.access === 'rejected') q("UPDATE users SET access='pending' WHERE id=?").run(u.id);
+  putRec(u.org_id, 'learner', u.id, L); json(res, 200, { learner: L });
+});
+route('PUT', '/api/program', async (req, res, u) => {
+  need(u, 'admin'); const cur = programOf(u.org_id); if (!cur) fail(404, 'This college does not run an online program.');
+  const b = await readJson(req); const t = (k, n) => b[k] != null ? String(b[k]).slice(0, n) : cur[k];
+  const pm = b.passMark != null ? Math.round(+b.passMark) : cur.passMark; if (!(pm >= 0 && pm <= 100)) fail(400, 'Pass mark must be 0-100%.');
+  const pr = { ...cur, open: b.open != null ? !!b.open : cur.open, title: t('title', 120), fee: t('fee', 20), currency: t('currency', 10), summary: t('summary', 600), instructions: t('instructions', 3000),
+    link: b.link != null ? (/^https?:\/\//i.test(String(b.link).trim()) || !String(b.link).trim() ? String(b.link).trim().slice(0, 500) : fail(400, 'The payment link must start with https://')) : cur.link, certNote: t('certNote', 1000), passMark: pm };
+  putRec(u.org_id, 'settings', 'program', pr); json(res, 200, { program: pr });
+});
+route('POST', '/api/learners/:id/decision', async (req, res, u, p) => {
+  need(u, 'admin', 'faculty'); if (!programOf(u.org_id)) fail(404, 'Not found.');
+  const t = sameOrg(u, p.id); if (!t || t.role !== 'student') fail(404, 'Learner not found.'); const b = await readJson(req);
+  const access = b.approve ? 'approved' : 'rejected'; q('UPDATE users SET access=? WHERE id=?').run(access, t.id);
+  const L = getRec(u.org_id, 'learner', t.id) || {}; L.decision = { status: access, note: String(b.note || '').slice(0, 500), by: u.id, at: now() }; putRec(u.org_id, 'learner', t.id, L);
+  json(res, 200, { learner: L, access });
+});
+route('POST', '/api/learners/:id/certificate', async (req, res, u, p) => {
+  need(u, 'admin', 'faculty'); if (!programOf(u.org_id)) fail(404, 'Not found.');
+  const t = sameOrg(u, p.id); if (!t || t.role !== 'student') fail(404, 'Learner not found.'); const b = await readJson(req);
+  const L = getRec(u.org_id, 'learner', t.id) || {};
+  if (b.revoke) delete L.certificate;
+  else {
+    const f = b.fileId ? q('SELECT * FROM files WHERE id=?').get(String(b.fileId)) : null;
+    if (b.fileId && (!f || f.kind !== 'certificate' || f.org !== u.org_id)) fail(400, 'Upload the certificate file first.');
+    if (f) q('UPDATE files SET for_user=? WHERE id=?').run(t.id, f.id);
+    L.certificate = { number: String(b.number || '').slice(0, 60), issuedAt: now(), by: u.id, ...(f ? { fid: f.id, name: f.name, size: f.size, at: f.created_at } : (L.certificate?.fid ? { fid: L.certificate.fid, name: L.certificate.name, size: L.certificate.size, at: L.certificate.at } : {})) };
+  }
+  putRec(u.org_id, 'learner', t.id, L); json(res, 200, { learner: L });
+});
+
 route('POST', '/api/login', async (req, res) => {
   const b = await readJson(req); const email = cleanEmail(b.email);
   throttle(email + '|' + (req.socket.remoteAddress || ''));
@@ -462,14 +605,16 @@ route('POST', '/api/files', async (req, res, u) => {
   const url = new URL(req.url, 'http://x'); const kind = url.searchParams.get('kind');
   const name = decodeURIComponent(String(req.headers['x-file-name'] || 'file')).replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 180);
   const ext = name.split('.').pop().toLowerCase();
-  if (!['activity', 'key', 'marked', 'submission'].includes(kind)) fail(400, 'Unknown file type.');
-  if (kind !== 'submission' && !isStaff(u)) fail(403, 'You do not have permission to upload this file.');
+  if (!['activity', 'key', 'marked', 'submission', 'receipt', 'certificate'].includes(kind)) fail(400, 'Unknown file type.');
+  if (kind === 'receipt' && (u.role !== 'student' || !programOf(u.org_id))) fail(403, 'Only program learners upload payment receipts.');
+  if (kind === 'receipt' && !['pdf', 'png', 'jpg', 'jpeg'].includes(ext)) fail(400, 'Upload the receipt as a PDF, PNG or JPG.');
+  if (!['submission', 'receipt'].includes(kind) && !isStaff(u)) fail(403, 'You do not have permission to upload this file.');
   if (kind === 'submission' && u.role !== 'student') fail(403, 'Only students submit work.');
   if (!ALLOWED_EXT.includes(ext)) fail(400, 'Upload a .docx, .pdf, .xlsx, .pptx or image file.');
   if (kind === 'submission' && !['docx', 'pdf'].includes(ext)) fail(400, 'Upload your completed work as .docx or .pdf.');
   const body = await readBody(req, MAX_UPLOAD); if (!body.length) fail(400, 'The file is empty.');
-  let forUser = kind === 'submission' ? u.id : (kind === 'marked' ? url.searchParams.get('student') : null);
-  if (kind === 'marked' && forUser && !sameOrg(u, forUser)) forUser = null;
+  let forUser = ['submission', 'receipt'].includes(kind) ? u.id : (['marked', 'certificate'].includes(kind) ? url.searchParams.get('student') : null);
+  if (['marked', 'certificate'].includes(kind) && forUser && !sameOrg(u, forUser)) forUser = null;
   const id = uid('f'); fs.writeFileSync(path.join(FILES, id), body);
   q('INSERT INTO files(id,name,size,kind,owner,for_user,path,created_at,org) VALUES(?,?,?,?,?,?,?,?,?)').run(id, name, body.length, kind, u.id, forUser, id, now(), u.org_id);
   json(res, 200, { fid: id, name, size: body.length, at: now() });
@@ -487,7 +632,8 @@ route('GET', '/api/files/:id', async (req, res, u, p) => {
 /* ---- student work and grading ---- */
 route('PUT', '/api/work/:aid', async (req, res, u, p) => {
   need(u, 'student'); const a = visibleAssignments(u)[p.aid]; if (!a) fail(404, 'Assignment not found.');
-  if (q('SELECT 1 FROM grades WHERE assignment_id=? AND student_id=?').get(p.aid, u.id)) fail(409, 'This assignment is already graded.');
+  const gRow = q('SELECT data FROM grades WHERE assignment_id=? AND student_id=?').get(p.aid, u.id); let failedGrade = null;
+  if (gRow) { const g0 = JSON.parse(gRow.data); const pr = programOf(u.org_id); if (pr && g0.score / (g0.max || 100) * 100 < pr.passMark) failedGrade = g0; else fail(409, 'This assignment is already graded.'); }
   const b = await readJson(req); const f = q('SELECT * FROM files WHERE id=?').get(String(b.fileId || ''));
   if (!f || f.kind !== 'submission' || f.for_user !== u.id) fail(400, 'Upload your file first.');
   const members = a.teamwork ? teammates(u).filter(m => m.id === u.id || !q('SELECT 1 FROM grades WHERE assignment_id=? AND student_id=?').get(p.aid, m.id)) : [u];
@@ -495,17 +641,19 @@ route('PUT', '/api/work/:aid', async (req, res, u, p) => {
   for (const m of members) {
     const prev = q('SELECT data FROM submissions WHERE assignment_id=? AND student_id=?').get(p.aid, m.id); const pd = prev ? JSON.parse(prev.data) : null;
     const sub = { status: 'submitted', file: { fid: f.id, name: f.name, size: f.size, at: f.created_at }, note: String(b.note || '').slice(0, 1000), submittedAt: now(),
-      history: [...(pd?.history || []), ...(pd?.file ? [{ file: pd.file, at: pd.submittedAt }] : [])].slice(-5), ...(a.teamwork && u.team ? { team: u.team, by: u.id, byName: u.name } : {}) };
+      history: [...(pd?.history || []), ...(pd?.file ? [{ file: pd.file, at: pd.submittedAt, ...(m.id === u.id && failedGrade ? { grade: failedGrade } : {}) }] : [])].slice(-5), ...(failedGrade ? { attempt: (pd?.attempt || 1) + 1 } : {}), ...(a.teamwork && u.team ? { team: u.team, by: u.id, byName: u.name } : {}) };
     q('INSERT INTO submissions(assignment_id,student_id,data) VALUES(?,?,?) ON CONFLICT(assignment_id,student_id) DO UPDATE SET data=excluded.data').run(p.aid, m.id, JSON.stringify(sub));
     if (m.id === u.id) mine = sub;
   }
+  if (failedGrade) q('DELETE FROM grades WHERE assignment_id=? AND student_id=?').run(p.aid, u.id);
   json(res, 200, { submission: mine, members: members.length });
 });
 /* coding abstract entered by the student in the EHR Coding activity */
 const cleanRows = (rows, keys) => (Array.isArray(rows) ? rows : []).slice(0, 60).map(r => Object.fromEntries(keys.map(k => [k, String(r?.[k] ?? '').slice(0, 300)])));
 route('PUT', '/api/abstract/:aid', async (req, res, u, p) => {
   need(u, 'student'); const a = visibleAssignments(u)[p.aid]; if (!a) fail(404, 'Assignment not found.');
-  if (q('SELECT 1 FROM grades WHERE assignment_id=? AND student_id=?').get(p.aid, u.id)) fail(409, 'This assignment is already graded. Your coding summary can no longer be changed.');
+  { const gr = q('SELECT data FROM grades WHERE assignment_id=? AND student_id=?').get(p.aid, u.id); const pr = programOf(u.org_id);
+    if (gr && !(pr && JSON.parse(gr.data).score / (JSON.parse(gr.data).max || 100) * 100 < pr.passMark)) fail(409, 'This assignment is already graded. Your coding summary can no longer be changed.'); }
   const b = await readJson(req);
   const ab = { dx: cleanRows(b.dx, ['code', 'poa', 'case', 'note']), px: cleanRows(b.px, ['code', 'date', 'case', 'note']), comments: String(b.comments || '').slice(0, 4000), chartId: a.ehr?.chartId || '', savedAt: now(),
     ...(a.teamwork && u.team ? { team: u.team, by: u.id, byName: u.name } : {}) };
@@ -537,7 +685,7 @@ function ownerOrgs() {
       students: activeStudents(o.id), studentsTotal: c('student'), faculty: c('faculty'), guests: c('guest'), admins,
       assignments: q("SELECT COUNT(*) n FROM records WHERE org=? AND kind='assignments'").get(o.id).n,
       submissions: q('SELECT COUNT(*) n FROM submissions s JOIN users x ON x.id=s.student_id WHERE x.org_id=?').get(o.id).n,
-      lastSignIn: last ? last - SESSION_DAYS * DAY : null, theme: site.theme || 'navy', logo: site.logo || '' };
+      lastSignIn: last ? last - SESSION_DAYS * DAY : null, theme: site.theme || 'navy', logo: site.logo || '', program: !!programOf(o.id) };
   });
 }
 function orgFields(b, o = {}) {
@@ -560,6 +708,7 @@ route('POST', '/api/owner/orgs', async (req, res, u) => {
   const id = uid('o');
   q('INSERT INTO orgs(id,slug,name,status,max_students,expires_at,contact,notes,created_at) VALUES(?,?,?,?,?,?,?,?,?)').run(id, f.slug, f.name, 'active', f.max, f.exp, f.contact, f.notes, now());
   putRec(id, 'settings', 'site', { theme: 'navy', custom: {}, siteName: 'CodeLab', institution: f.name, logo: '', showName: true, logoTile: true, topbarHeight: 60, stripeWidth: 3, updatedAt: now() });
+  if (b.program) putRec(id, 'settings', 'program', { ...PROGRAM_DEFAULT, open: false });
   seedOrg(id);
   const admin = createUser(u, { name: b.adminName, email: adminEmail, role: 'admin' }, id);
   json(res, 200, { org: ownerOrgs().find(o => o.id === id), ...admin });
@@ -601,7 +750,7 @@ route('GET', '/api/owner/content-status', async (req, res, u) => {
 });
 
 /* read-only rule for colleges whose subscription has ended */
-const READONLY_OK = ['/api/login', '/api/logout', '/api/password', '/api/setup'];
+const READONLY_OK = ['/api/login', '/api/logout', '/api/password', '/api/setup', '/api/join'];
 function guardWrite(req, u, pathname) {
   if (!u || u.role === 'owner' || req.method === 'GET' || READONLY_OK.includes(pathname)) return;
   const o = getOrg(u.org_id);
@@ -622,7 +771,7 @@ const server = http.createServer(async (req, res) => {
       fail(404, 'Not found.');
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') fail(405, 'Method not allowed.');
-    let file = url.pathname === '/' || url.pathname.startsWith('/ehr/') || /^\/codes(\/[^/]*)?$/.test(url.pathname) || /^\/c\/[^/]+\/?$/.test(url.pathname) ? 'index.html' : path.normalize(url.pathname).replace(/^([\\/])+/, '');
+    let file = url.pathname === '/' || url.pathname.startsWith('/ehr/') || /^\/codes(\/[^/]*)?$/.test(url.pathname) || /^\/join(\/[^/]*)?$/.test(url.pathname) || /^\/register\/?$/.test(url.pathname) || /^\/c\/[^/]+\/?$/.test(url.pathname) ? 'index.html' : path.normalize(url.pathname).replace(/^([\\/])+/, '');
     const fp = path.join(PUBLIC, file);
     if (!fp.startsWith(PUBLIC) || !fs.existsSync(fp) || fs.statSync(fp).isDirectory()) return send(res, 404, 'Not found', { 'Content-Type': 'text/plain' });
     const hdr = { 'Content-Type': MIME[path.extname(fp)] || 'application/octet-stream', 'Cache-Control': file === 'index.html' ? 'no-cache' : file === 'icd10cm.json' ? 'public, max-age=86400' : 'public, max-age=300', 'Vary': 'Accept-Encoding' };

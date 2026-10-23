@@ -48,7 +48,8 @@ async function api(method, url, body, raw){
 }
 async function refresh(){
   const d=await api('GET','/api/bootstrap');
-  S.me=d.me; S.faculty=d.faculty; S.students=d.students; S.patients=d.patients; S.assignments=d.assignments; S.library=d.library; S.work=d.work; S.grades=d.grades; S.guests=d.guests||{}; S.org=d.org||null; S.orgs=d.orgs||[]; S.abstracts=d.abstracts||{}; S.team=d.team||[];
+  S.me=d.me; S.faculty=d.faculty; S.students=d.students; S.patients=d.patients; S.assignments=d.assignments; S.library=d.library; S.work=d.work; S.grades=d.grades; S.guests=d.guests||{}; S.org=d.org||null; S.orgs=d.orgs||[]; S.abstracts=d.abstracts||{}; S.team=d.team||[]; S.joincodes=d.joincodes||{};
+  S.program=d.program||null; S.learner=d.learner||null; S.learners=d.learners||{};
 }
 async function write(fn, okMsg){
   try{ await fn(); await refresh(); if(okMsg) toast(okMsg); return true; }
@@ -62,6 +63,7 @@ async function putFile(base, file, onProgress){
   if(file.size>MAX_FILE) throw new Error('That file is larger than 20 MB.');
   let kind='activity', extra='';
   if(base==='keyfiles') kind='key'; else if(base.startsWith('work/')) kind='submission'; else if(base.startsWith('grades/')){ kind='marked'; extra='&student='+encodeURIComponent(base.split('/')[1]); }
+  else if(base==='receipt') kind='receipt'; else if(base.startsWith('cert/')){ kind='certificate'; extra='&student='+encodeURIComponent(base.split('/')[1]); }
   onProgress?.(0.3);
   const meta=await api('POST', `/api/files?kind=${kind}${extra}`, undefined, {body:file, headers:{'X-File-Name':encodeURIComponent(file.name),'Content-Type':'application/octet-stream'}});
   onProgress?.(1);
@@ -160,6 +162,29 @@ function realRole(){ return S.me.role; }
 function mySection(){ return S.me.section || ''; }
 function students(){ return Object.values(S.students).filter(u=>u.role==='student'); }
 function facultyList(){ return Object.values(S.faculty).filter(u=>u.role==='faculty'); }
+function joinPanel(){
+  const codes=Object.entries(S.joincodes||{}).sort((a,b)=>(b[1].createdAt||0)-(a[1].createdAt||0));
+  const st=j=> !j.active? '<span class="pill">Off</span>' : j.expiresAt && j.expiresAt<=Date.now()? '<span class="pill bad">Expired</span>' : j.maxUses && j.uses>=j.maxUses? '<span class="pill warn">Full</span>' : '<span class="pill ok">Open</span>';
+  return `<section class="panel panel-pad stack"><div><h2>Class codes: let students create their own accounts</h2>
+    <p class="small muted">Create a code for a class and share the link or the code. Students open <span class="mono">${esc(location.host)}/join</span>, enter the code and choose their own password. They are placed in the section you choose and count toward your plan's student limit. Turn a code off when the class has joined.</p></div>
+    <form class="row" data-form="new-joincode" style="align-items:flex-end">
+      <label class="field"><span>Section</span><input type="text" id="jc-sec" name="section" list="sec-list" placeholder="e.g. HIM-301 A" style="width:170px"></label>
+      <label class="field"><span>Label (optional)</span><input type="text" id="jc-label" name="label" placeholder="e.g. Fall 2026 coding lab" style="width:200px"></label>
+      <label class="field"><span>Code works for</span><select id="jc-days" name="days">${[[7,'7 days'],[14,'14 days'],[30,'30 days'],[90,'90 days'],[0,'No end date']].map(([v,l])=>`<option value="${v}" ${v===14?'selected':''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>Maximum students</span><input type="number" id="jc-max" name="maxUses" min="0" placeholder="No limit" style="width:120px"></label>
+      <button class="btn primary" type="submit">Create class code</button></form>
+    ${codes.length? tbl(['Code','Section','Label','Joined','Status','Ends',''], codes.map(([c,j])=>`<tr class="${S.acct.newCode===c?'hl':''}"><td><b class="mono join-code">${esc(c)}</b></td><td>${esc(j.section||'—')}</td><td>${esc(j.label||'')}</td><td class="num">${j.uses||0}${j.maxUses?' / '+j.maxUses:''}</td><td>${st(j)}</td><td class="small">${j.expiresAt? fmtWhen(j.expiresAt) : 'No end date'}</td>
+      <td><div class="row" style="flex-wrap:nowrap;gap:6px"><button class="btn sm" data-act="copy-join" data-v="${esc(c)}">Copy link</button><button class="btn sm" data-act="join-print" data-v="${esc(c)}">Print</button>${j.active?`<button class="btn sm" data-act="join-off" data-v="${esc(c)}">Turn off</button>`:`<button class="btn sm" data-act="join-on" data-v="${esc(c)}" ${j.expiresAt&&j.expiresAt<=Date.now()?'data-exp="1"':''}>Turn on</button>`}<button class="btn sm danger" data-act="join-del" data-v="${esc(c)}">Delete</button></div></td></tr>`))
+      : '<p class="hint">No class codes yet.</p>'}
+    ${S.acct.printCode && S.joincodes?.[S.acct.printCode]? `<div class="join-print"><h1>Join ${esc(S.org?.name||'')} on ${esc(S.site.siteName||'CodeLab')}</h1><p>1. Go to <b>${esc(location.host)}/join</b></p><p>2. Enter the class code</p><div class="join-big">${esc(S.acct.printCode)}</div><p>3. Enter your name, college email and a password you choose.</p><p class="small">Section: ${esc(S.joincodes[S.acct.printCode].section||'—')}</p></div>`:''}
+  </section>`;
+}
+async function joinCheck(code){
+  S.join=S.join||{}; S.join.code=String(code||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^(.{4})(.{4})$/,'$1-$2'); S.join.info=null; S.join.err='';
+  if(!S.join.code){ S.join.err='Enter the class code from your faculty.'; render(); return; }
+  try{ S.join.info=await api('GET','/api/join/'+encodeURIComponent(S.join.code)); if(!S.join.info.ok) S.join.err=S.join.info.why; }catch(e){ S.join.err=e.message; }
+  render(); setTimeout(()=>document.getElementById(S.join.info?.ok?'jn-name':'jn-code')?.focus(),0);
+}
 function teams(){ return [...new Set(students().map(s=>s.team).filter(Boolean))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})); }
 function sections(){ return [...new Set(students().map(s=>s.section).filter(Boolean))].sort(); }
 function targetStudents(a){ return students().filter(s=> s.active && (a.target==='all' || s.section===a.target)); }
@@ -169,6 +194,7 @@ function myAssignments(){ return Object.entries(S.assignments).map(([id,a])=>({i
 function allAssignments(){ return Object.entries(S.assignments).map(([id,a])=>({id,...a})).sort((x,y)=>(y.createdAt||0)-(x.createdAt||0)); }
 function studentStatus(sid, a){
   const s=sub(sid,a.id), g=grade(sid,a.id);
+  if(g && S.program) return passed(g)? {k:'graded', label:`Passed ${pct(g)}%`, cls:'ok'} : {k:'resubmit', label:`Not passed (${pct(g)}%): resubmit`, cls:'bad'};
   if(g) return {k:'graded', label:`Graded ${g.score}/${a.points||100}`, cls:'ok'};
   if(s?.status==='submitted') return {k:'submitted', label: isLate(a,s.submittedAt)?'Submitted late':'Submitted', cls: isLate(a,s.submittedAt)?'warn':'info'};
   if(a.due && a.due < TODAY) return {k:'overdue', label:'Missing', cls:'bad'};
@@ -198,8 +224,12 @@ function navFor(r){
   const n=[];
   if(r==='owner') return [['colleges','Colleges',(S.orgs||[]).length],['appearance','Platform appearance'],['account','My account']];
   if(r==='admin') n.push(['overview','Overview'],['people','Faculty',facultyList().length]);
+  if((r==='admin'||r==='faculty') && S.program) n.push(['registrations','Registrations',students().filter(u=>u.access==='pending' && S.learners?.[u.id]?.receipt).length],['certificates','Certificates',students().filter(u=>u.access==='approved' && progressOf(u.id).eligible && !S.learners?.[u.id]?.certificate).length]);
+  if(r==='admin' && S.program) n.push(['program','Program settings']);
   if(r==='admin'||r==='faculty') n.push(['students','Students',students().length],['library','Assignment library',Object.keys(S.library).length],['assignments','Assigned work',Object.keys(S.assignments).length],['cases','EHR patient charts',Object.keys(S.patients).length],['codes','ICD-10-CM code book']);
-  if(r==='student') n.push(['my','My assignments',myAssignments().length],['grades','My grades'],['codes','ICD-10-CM code book']);
+  if(r==='student' && S.program){ if(S.me.access==='pending'||S.me.access==='rejected') n.push(['registration','Registration & payment']);
+    else n.push(['my','My practicals',myAssignments().length],['progress','Progress & certificate'],['codes','ICD-10-CM code book'],['registration','Registration & payment']); }
+  else if(r==='student') n.push(['my','My assignments',myAssignments().length],['grades','My grades'],['codes','ICD-10-CM code book']);
   if(r==='guest') n.push(['library','Activity library',Object.keys(S.library).length],['cases','EHR patient charts',Object.keys(S.patients).length],['codes','ICD-10-CM code book']);
   if(r==='admin') n.push(['guests','Guests',Object.keys(S.guests||{}).length],['appearance','Appearance']);
   n.push(['account','My account']);
@@ -285,6 +315,8 @@ function render(){
   if(S.auth==='loading'){ m.innerHTML='<div class="empty">Loading…</div>'; return; }
   m.classList.toggle('lp-window', S.auth==='login' || S.auth==='setup');
   if(S.auth==='setup'){ m.innerHTML=VIEWS.setup(); return; }
+  if(S.auth==='login' && S.joinOnly){ m.innerHTML=VIEWS.join(); return; }
+  if(S.auth==='login' && S.registerOnly){ m.innerHTML=VIEWS.register(); return; }
   if(S.auth==='login'){ m.innerHTML= S.orgSlug? (S.site.orgFound===false? VIEWS.collegeMissing() : VIEWS.collegeLogin()) : VIEWS.landing(); return; }
   if(S.me.mustChange){ m.innerHTML=VIEWS.forcePw(); return; }
   m.classList.toggle('ehr-window', !!(S.ehrOnly||S.codesOnly)); m.classList.toggle('ew-window', !!S.ehrOnly);
@@ -363,7 +395,7 @@ VIEWS.people=()=>{
 };
 VIEWS.students=()=>{
   const isAdmin=role()==='admin'; const mine=S.acct.mine && !isAdmin; const q=S.acct.q.toLowerCase();
-  const all=students().filter(s=>(!mine || s.createdBy===S.me.id) && (!q || (s.name+' '+s.email+' '+s.section).toLowerCase().includes(q))).sort((a,b)=>((a.section||'~')+a.name).localeCompare((b.section||'~')+b.name));
+  const all=students().filter(s=>(!mine || s.createdBy===S.me.id || S.joincodes?.[String(s.createdBy||'').slice(5)]?.createdBy===S.me.id) && (!q || (s.name+' '+s.email+' '+s.section).toLowerCase().includes(q))).sort((a,b)=>((a.section||'~')+a.name).localeCompare((b.section||'~')+b.name));
   return `
   <div class="page-head"><div><span class="label">${ROLE_LABEL[role()]}</span><h1>Students</h1><p class="muted">Create student accounts and place them in sections. Assignments go to all students or to one section.${S.org&&S.org.maxStudents? ` <b>${S.org.students} of ${S.org.maxStudents}</b> active students used on your plan.`:''}</p></div></div>
   ${credsBox()}
@@ -385,6 +417,7 @@ VIEWS.students=()=>{
     </form></section>
   </div>
   <datalist id="sec-list">${sections().map(s=>`<option value="${esc(s)}">`).join('')}</datalist><datalist id="team-list">${teams().map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+  ${joinPanel()}
   <section class="panel panel-pad stack"><h2>Teams for group activities</h2>
     <p class="small muted">Group activities (for example the Billing activities) are done in teams: one member submits for the whole team and the grade can be given to every member. Type a team name next to each student in the roster, or make teams automatically.</p>
     <div class="row" style="align-items:flex-end"><label class="field"><span>Section</span><select id="mt-sec"><option value="">All students</option>${sections().map(x=>`<option>${esc(x)}</option>`).join('')}</select></label>
@@ -398,7 +431,7 @@ VIEWS.students=()=>{
       <td><input type="text" id="sec-${esc(p.id)}" data-act="set-sec" data-v="${esc(p.id)}" value="${esc(p.section||'')}" placeholder="Unassigned" style="width:130px" list="sec-list"></td>
       <td><input type="text" id="team-${esc(p.id)}" data-act="set-team" data-v="${esc(p.id)}" value="${esc(p.team||'')}" placeholder="No team" style="width:100px" list="team-list"></td>
       <td>${p.active? (p.mustChange?'<span class="pill warn">Not signed in yet</span>':'<span class="pill ok">Active</span>') : '<span class="pill bad">Deactivated</span>'}</td>
-      <td class="small">${p.createdBy===S.me.id?'You':esc(name(p.createdBy))}</td>
+      <td class="small">${p.createdBy===S.me.id?'You':/^join:/.test(p.createdBy||'')?`Signed up with code <span class="mono">${esc(p.createdBy.slice(5))}</span>`:esc(name(p.createdBy))}</td>
       <td class="num">${Object.values(S.work[p.id]||{}).filter(s=>s.status==='submitted').length}</td>
       <td><div class="row" style="flex-wrap:nowrap"><button class="btn sm" data-act="reset-pw" data-v="${esc(p.id)}">Reset password</button><button class="btn sm" data-act="toggle-active" data-v="${esc(p.id)}">${p.active?'Deactivate':'Reactivate'}</button><button class="btn sm danger" data-act="rm-user" data-v="${esc(p.id)}">Delete</button></div></td></tr>`))
       : `<div class="empty">No students match. Create accounts above or import a class list.</div>`}</section>`;
@@ -475,7 +508,7 @@ VIEWS.colleges=()=>{
   </div>
   ${S.ostat&&S.ostat.differing? `<section class="panel panel-pad row" style="justify-content:space-between"><div><h2>Built-in content update available</h2><p class="small muted">${S.ostat.differing} built-in EHR records or activities differ from the latest version across your colleges. Updating replaces them with the latest version; colleges' own work is not changed.</p></div><button class="btn primary" data-act="owner-refresh">Update all colleges</button></section>`:''}
   <section class="panel">${os.length? tbl(['College','Status','Students','End date','Faculty','Last sign-in',''], os.map(o=>{ const st=orgState(o);
-      return `<tr><td><div class="person">${orgLogo(o)}<div><b>${esc(o.name)}</b><div class="small muted mono">/c/${esc(o.slug)}</div></div></div></td>
+      return `<tr><td><div class="person">${orgLogo(o)}<div><b>${esc(o.name)}</b><div class="small muted mono">/c/${esc(o.slug)}${o.program?' <span class="pill info">Online program</span>':''}</div></div></div></td>
         <td><span class="pill ${st.cls}">${esc(st.label)}</span></td><td class="num">${o.students}${o.maxStudents?` / ${o.maxStudents}`:' <span class="muted small">(no limit)</span>'}</td>
         <td class="num">${esc(fmtDay(o.expiresAt))}</td><td class="num">${o.faculty}</td><td class="num">${o.lastSignIn? esc(fmtDay(o.lastSignIn)) : '<span class="muted">Never</span>'}</td>
         <td><button class="btn sm" data-act="open-college" data-v="${esc(o.id)}">Manage</button></td></tr>`; }))
@@ -488,6 +521,7 @@ VIEWS.colleges=()=>{
       <label class="field"><span>College admin's email</span><input type="text" id="no-ae" data-bind="adminEmail" inputmode="email" value="${esc(f.adminEmail)}" required></label>
       <label class="field"><span>Student limit (leave empty for no limit)</span><input type="number" id="no-max" min="0" data-bind="maxStudents" value="${esc(f.maxStudents)}" placeholder="e.g. 300"></label>
       <label class="field"><span>Subscription end date (leave empty for no end date)</span><input type="date" id="no-exp" data-bind="expiresOn" value="${esc(f.expiresOn)}"></label>
+      <label class="row small" style="gap:8px"><input type="checkbox" id="no-prog" data-bind="program" ${f.program?'checked':''}> Run an online certificate program (independent learners register and pay at /register)</label>
       <div><button class="btn primary" type="submit">Create college</button></div>
     </form>
     <p class="hint">CodeLab copies all built-in EHR records and activities into the new college. The admin can then change the college's logo and colours, and add faculty and students.</p></section>`;
@@ -785,7 +819,7 @@ VIEWS.assign=()=>{
   </section>`;
 };
 async function doAssign(){
-  const f=S.form; if(!f.due) return toast('Choose a due date.');
+  const f=S.form; if(!f.due && !S.program) return toast('Choose a due date.');
   const items=f.tids.map(id=>({id,...S.library[id]})).filter(t=>t.title && ready(t));
   if(!items.length) return toast('None of the selected activities has both a document and an EHR patient chart yet.');
   let n=0;
@@ -807,7 +841,7 @@ VIEWS.assignments=()=>{
     const subs=Object.keys(S.work).filter(sid=>sub(sid,a.id)?.status==='submitted').length;
     const toGrade=Object.keys(S.work).filter(sid=>sub(sid,a.id)?.status==='submitted' && !grade(sid,a.id)).length;
     return `<div class="asg"><div class="stack" style="gap:6px;min-width:0">
-      <div class="row">${a.due<TODAY?'<span class="pill">Closed</span>':'<span class="pill info">Open</span>'}${toGrade?`<span class="pill warn">${toGrade} to grade</span>`:''}</div>
+      <div class="row">${a.due&&a.due<TODAY?'<span class="pill">Closed</span>':'<span class="pill info">Open</span>'}${toGrade?`<span class="pill warn">${toGrade} to grade</span>`:''}</div>
       <h3>${esc(a.title)}</h3>
       <div class="meta"><span>Due ${fmtDate(a.due)}</span><span>${a.target==='all'?'All students':'Section '+esc(a.target)}</span><span>EHR: ${esc(ehrLabel(a)||'none')}</span><span>${a.points||100} pts</span><span>${subs}${n?'/'+n:''} submitted</span></div>
     </div><div class="row"><button class="btn" data-act="edit-asg" data-v="${a.id}">Edit</button><button class="btn primary" data-act="review" data-v="${a.id}">Submissions</button></div></div>`; }).join('')
@@ -870,7 +904,7 @@ async function saveBuilt(asTemplate){
     if(await API.saveTemplate((f.kind==='template' && f.id) || ('L'+uid()), t)){ toast(asTemplate?'Saved a copy to the library':'Saved to the library'); go('library'); }
     return;
   }
-  if(!f.due) return toast('Choose a due date.');
+  if(!f.due && !S.program) return toast('Choose a due date.');
   if(!ehr) return toast('Choose the EHR patient chart students will use.');
   const prev=f.id? S.assignments[f.id] : null;
   const a={...common, category:prev?.category||'', due:f.due, target:f.target||'all', createdAt: prev?.createdAt||Date.now(), createdBy: prev?.createdBy||S.me.id};
@@ -1015,22 +1049,23 @@ async function saveCase(){
 VIEWS.my=()=>{
   const list=myAssignments(); const me=S.me.id;
   const done=a=>['submitted','graded'].includes(studentStatus(me,a).k);
+  const pg=!!S.program;
   const card=a=>{ const st=studentStatus(me,a); if(a.teamwork) a={...a, category:(a.category? a.category+' · ':'')+'Group activity'};
     return `<div class="asg"><div class="stack" style="gap:6px;min-width:0"><div class="row"><span class="pill ${st.cls}">${esc(st.label)}</span>${a.category?`<span class="pill">${esc(a.category)}</span>`:''}</div><h3>${esc(a.title)}</h3>
-      <div class="meta"><span>Due ${fmtDate(a.due)}</span><span>${a.points||100} pts</span></div></div><button class="btn ${done(a)?'':'primary'}" data-act="work" data-v="${a.id}">${done(a)?'View':'Open'}</button></div>`; };
+      <div class="meta">${a.due?`<span>Due ${fmtDate(a.due)}</span>`:''}<span>${a.points||100} pts</span></div></div><button class="btn ${done(a)?'':'primary'}" data-act="work" data-v="${a.id}">${done(a)?'View':'Open'}</button></div>`; };
   const open=list.filter(a=>!done(a)), fin=list.filter(done);
   return `
-  <div class="page-head"><div><span class="label">Student${mySection()? ' · Section '+esc(mySection()):''}</span><h1>My assignments</h1><p class="muted">Download the activity document, do the practical in the EHR, then upload your completed document.</p></div></div>
+  <div class="page-head"><div><span class="label">${pg?esc(S.program.title):'Student'}${!pg&&mySection()? ' · Section '+esc(mySection()):''}</span><h1>${pg?'My practicals':'My assignments'}</h1><p class="muted">Download the activity document, do the practical in the EHR, then upload your completed document.${pg?` Each practical needs ${passMark()}% or more to pass; you can resubmit a practical you do not pass.`:''}</p></div></div>
   <section class="stack"><h2>To do <span class="count">${open.length}</span></h2><div class="panel">${open.length? open.map(card).join('') : `<div class="empty">You're all caught up. New assignments from your faculty will appear here.</div>`}</div></section>
   <section class="stack"><h2>Submitted <span class="count">${fin.length}</span></h2><div class="panel">${fin.length? fin.map(card).join('') : `<div class="empty">Nothing submitted yet.</div>`}</div></section>`;
 };
 VIEWS.work=({aid})=>{
   const a={id:aid,...S.assignments[aid]}; if(!S.assignments[aid]) return `<div class="empty">This assignment is no longer available.</div>`;
   const s=sub(S.me.id,aid), g=grade(S.me.id,aid), st=studentStatus(S.me.id,a), up=S.upload, f=S.form||{};
-  const canSubmit=!g;
+  const canSubmit=!g || (!!S.program && !passed(g));
   return `
-  <div class="page-head"><div><button class="btn sm" data-act="go" data-v="my">← My assignments</button><h1 style="margin-top:8px">${esc(a.title)}</h1>
-    <div class="meta"><span>Due ${fmtDate(a.due)}</span><span>${a.points||100} points</span><span class="pill ${st.cls}">${esc(st.label)}</span></div></div></div>
+  <div class="page-head"><div><button class="btn sm" data-act="go" data-v="my">← ${S.program?'My practicals':'My assignments'}</button><h1 style="margin-top:8px">${esc(a.title)}</h1>
+    <div class="meta">${a.due?`<span>Due ${fmtDate(a.due)}</span>`:''}<span>${a.points||100} points</span><span class="pill ${st.cls}">${esc(st.label)}</span></div></div></div>
   ${a.description?`<p class="scenario muted">${esc(a.description)}</p>`:''}${a.instructions?`<p class="scenario">${esc(a.instructions)}</p>`:''}
   ${a.teamwork? `<div class="panel panel-pad team-box"><b>Group activity.</b> ${S.me.team? `You are in <b>${esc(S.me.team)}</b>: ${esc((S.team||[]).map(x=>x.name).join(', '))}. Work together on the document and in the EHR. <b>One member uploads and submits for the whole team</b>; the submission and the codes entered in the EHR Coding activity are shared with every member.${s?.byName?` Last submitted by ${esc(s.byName)}.`:''}` : 'You have not been placed in a team yet. Ask your faculty to add you to a team. Until then, you can submit on your own.'}</div>`:''}
   <ol class="steps">
@@ -1039,7 +1074,7 @@ VIEWS.work=({aid})=>{
     <li class="panel panel-pad stack"><div class="step-h"><span class="step-n">2</span><div><h2>Code from the record in the EHR</h2><p class="small muted">The EHR opens in a new tab. Read the record, look up codes in the <b>Code Book</b>, and enter your codes in the <b>Coding</b> activity: they are saved to this assignment. Keep this page open so you can come back and upload.</p></div></div>
       <div>${ehrHref(a)? `<a class="btn primary" href="${esc(ehrHref(a))}" target="_blank" rel="noopener">Open EHR in new tab ↗</a> <span class="small muted">${esc(ehrLabel(a))}</span>` : '<p class="hint">Your faculty has not linked an EHR record to this assignment yet.</p>'}</div>
       ${(()=>{ const ab=S.abstracts?.[S.me.id]?.[aid]; const nd=(ab?.dx||[]).length, np=(ab?.px||[]).length; return `<p class="small ${ab?'':'muted'}">${ab? `<span class="pill ok">Coding saved</span> ${nd} diagnosis code${nd===1?'':'s'}, ${np} procedure code${np===1?'':'s'} · ${fmtWhen(ab.savedAt)}` : 'No codes entered in the EHR Coding activity yet.'}</p>`; })()}</li>
-    <li class="panel panel-pad stack"><div class="step-h"><span class="step-n">3</span><div><h2>Upload your completed document</h2><p class="small muted">Save the document with your answers, then upload it here. ${canSubmit?'You can replace it until it is graded.':''}</p></div></div>
+    <li class="panel panel-pad stack"><div class="step-h"><span class="step-n">3</span><div><h2>Upload your completed document</h2><p class="small muted">Save the document with your answers, then upload it here. ${g&&canSubmit?`<b>Your last attempt scored ${pct(g)}% (pass mark ${passMark()}%).</b> Read the feedback below, correct your work and codes, then submit again.`:canSubmit?'You can replace it until it is graded.':''}</p></div></div>
       ${s?.file? `<div class="stack" style="gap:6px"><span class="label">Submitted ${fmtWhen(s.submittedAt)}${isLate(a,s.submittedAt)?' · late':''}</span><div class="files">${fileRow(s.file)}</div></div>`:''}
       ${canSubmit? `${f.pending? `<div class="files">${fileRow(f.pending,`<button class="btn sm danger" data-act="clear-pending">Remove</button>`)}</div>`:''}
         ${up? `<span class="small muted">Uploading ${esc(up.name)}… ${Math.round(up.p*100)}%</span>` : (f.pending? '' : `<label class="btn" style="align-self:flex-start"><input type="file" id="up-sub" data-act="upload" data-slot="sub" accept=".docx,.pdf" hidden>${s?.file?'Choose a replacement file':'Choose your completed file'}</label>`)}
@@ -1139,6 +1174,11 @@ document.addEventListener('click', async e=>{
     case 'logo-remove': S.form.logo=''; applyTheme(S.form); render(); break;
     case 'theme-save': try{ const saved=await api('PUT','/api/settings',Object.fromEntries(APPEAR_KEYS.map(k=>[k,S.form[k]]))); S.site={...DEFAULT_SITE,...saved}; applyTheme(S.site); toast('Appearance saved for everyone'); render(); }catch(err){ toast(err.message); } break;
     case 'dl-creds': downloadCreds(); break;
+    case 'copy-join': { const link=location.origin+'/join/'+v; try{ await navigator.clipboard.writeText(link); toast('Link copied: '+link); }catch(_){ toast(link); } break; }
+    case 'join-off': if(await write(()=>api('PATCH','/api/joincodes/'+encodeURIComponent(v),{active:false}))) { toast('Code turned off'); render(); } break;
+    case 'join-on': if(await write(()=>api('PATCH','/api/joincodes/'+encodeURIComponent(v),{active:true, extendDays: el.dataset.exp? 14 : undefined}))) { toast('Code turned on'); render(); } break;
+    case 'join-del': if(!confirmTwice('Click again to delete')) return; if(await write(()=>api('DELETE','/api/joincodes/'+encodeURIComponent(v)))) { toast('Code deleted'); render(); } break;
+    case 'join-print': S.acct.printCode=v; render(); setTimeout(()=>window.print(),200); break;
     case 'make-teams': { const sec=document.getElementById('mt-sec').value, size=+document.getElementById('mt-size').value||3;
       const list=students().filter(x=>x.active && (!sec || x.section===sec)).sort((a,b)=>a.name.localeCompare(b.name)); if(!list.length) return toast('No active students to place in teams.');
       if(!confirmTwice(`Click again to make ${Math.ceil(list.length/size)} teams`)) return;
@@ -1168,13 +1208,19 @@ document.addEventListener('submit', async e=>{
         if(d.next!==d.repeat){ toast('The new passwords do not match.'); break; }
         await api('POST','/api/password',{current:d.current,next:d.next}); await refresh(); toast('Password changed'); render(); break;
       case 'add-faculty': { const r=await api('POST','/api/users',{name:d.name,email:d.email,role:'faculty'}); S.acct.created=[{ok:true,...r}]; await refresh(); render(); window.scrollTo(0,0); toast('Faculty account created'); break; }
-      case 'add-org': { const f=S.form; const r=await api('POST','/api/owner/orgs',{name:f.name,slug:f.slug,adminName:f.adminName,adminEmail:f.adminEmail,maxStudents:f.maxStudents===''?0:+f.maxStudents,expiresOn:f.expiresOn||null});
+      case 'add-org': { const f=S.form; const r=await api('POST','/api/owner/orgs',{name:f.name,slug:f.slug,adminName:f.adminName,adminEmail:f.adminEmail,maxStudents:f.maxStudents===''?0:+f.maxStudents,expiresOn:f.expiresOn||null,program:!!f.program});
         S.ocreds={org:r.org.name,slug:r.org.slug,name:r.user.name,email:r.user.email,temp:r.tempPassword}; S.form=null; await refresh(); render(); window.scrollTo(0,0); toast('College created'); break; }
       case 'add-org-admin': { const f=S.form, o=S.orgs.find(x=>x.id===S.route.p.id); const r=await api('POST',`/api/owner/orgs/${o.id}/admins`,{name:f.newAdmin,email:f.newAdminEmail});
         S.ocreds={org:o.name,slug:o.slug,name:r.user.name,email:r.user.email,temp:r.tempPassword}; S.form=null; await refresh(); render(); window.scrollTo(0,0); toast('Admin added'); break; }
       case 'add-guest': { const r=await api('POST','/api/users',{name:d.name,email:d.email,section:d.section,days:+d.days||7,role:'guest'}); S.acct.created=[{ok:true,...r}]; await refresh(); render(); window.scrollTo(0,0); toast('Guest account created'); break; }
       case 'add-student': { S.acct.section=d.section||''; const r=await api('POST','/api/users',{name:d.name,email:d.email,section:d.section,team:d.team,role:'student'}); S.acct.created=[...(S.acct.created||[]),{ok:true,...r}]; await refresh(); render(); window.scrollTo(0,0); toast('Student account created'); break; }
       case 'import': await importRows(parseCsv(d.rows)); break;
+      case 'join': { if(d.password!==d.repeat){ toast('The two passwords do not match.'); break; }
+        const r=await api('POST','/api/join',{code:d.code,name:d.name,email:d.email,password:d.password}); S.joinOnly=false; history.replaceState(null,'','/c/'+encodeURIComponent(r.slug)); S.orgSlug=r.slug; await start(); toast('Welcome! Your account is ready.'); break; }
+      case 'join-code': await joinCheck(d.code); break;
+      case 'register': { if(d.password!==d.repeat){ toast('The two passwords do not match.'); break; }
+        const r=await api('POST','/api/register',{name:d.name,email:d.email,phone:d.phone,country:d.country,password:d.password,agree:!!d.agree}); S.registerOnly=false; history.replaceState(null,'','/c/'+encodeURIComponent(r.slug)); S.orgSlug=r.slug; await start(); S.route={name:'registration',p:{}}; render(); toast('Account created. Next: pay the fee and upload your receipt.'); break; }
+      case 'new-joincode': { const r=await api('POST','/api/joincodes',{section:d.section, days:+d.days||0, maxUses:+d.maxUses||0, label:d.label}); await refresh(); S.acct.newCode=r.code; render(); toast('Class code '+r.code+' created'); break; }
     }
   }catch(err){ toast(err.message); }
   if(btn && document.body.contains(btn)) btn.disabled=false;
@@ -1211,11 +1257,14 @@ document.addEventListener('change', async e=>{
   if(el.dataset.act==='upload' && el.files?.[0]){
     const file=el.files[0], slot=el.dataset.slot;
     if(slot==='sub' && !['docx','pdf'].includes(ext(file.name))) return toast('Upload your completed document as .docx or .pdf.');
-    const base= slot==='sub'? `work/${S.me.id}/f` : slot==='graded'? `grades/${S.form.sid}/f` : slot==='keyDocs'? 'keyfiles' : 'files';
+    if((slot==='receipt'||slot.startsWith('cert-')) && !['pdf','png','jpg','jpeg'].includes(ext(file.name))) return toast('Upload a PDF, PNG or JPG file.');
+    if(!S.form) S.form={};
+    const base= slot==='receipt'? 'receipt' : slot.startsWith('cert-')? 'cert/'+slot.slice(5) : slot==='sub'? `work/${S.me.id}/f` : slot==='graded'? `grades/${S.form.sid}/f` : slot==='keyDocs'? 'keyfiles' : 'files';
     const form=S.form; S.upload={slot, name:file.name, p:0}; S.busy=true; render();
     try{
       const meta=await putFile(base, file, p=>{ S.upload.p=p; render(); });
-      if(slot==='sub') form.pending=meta; else if(slot==='graded') form.file=meta; else form[slot].push(meta);
+      if(slot==='receipt') form.receipt=meta; else if(slot.startsWith('cert-')){ ((S.certForm||={})[slot.slice(5)]||={}).file=meta; }
+      else if(slot==='sub') form.pending=meta; else if(slot==='graded') form.file=meta; else form[slot].push(meta);
       toast('Uploaded '+file.name);
     }catch(err){ toast('Upload failed: '+err.message); }
     S.upload=null; S.busy=false; render();
@@ -1252,12 +1301,13 @@ async function logoDataUrl(file){
 }
 function readPath(){ const m=/^\/ehr\/([^/]+)$/.exec(location.pathname); S.ehrOnly=m? decodeURIComponent(m[1]) : null;
   const cm=/^\/codes(?:\/([^/]*))?$/.exec(location.pathname); S.codesOnly=!!cm; if(cm && cm[1]) S.cb.sel=decodeURIComponent(cm[1]);
-  S.ehrAid=new URLSearchParams(location.search).get('a')||null; const c=/^\/c\/([^/]+)\/?$/.exec(location.pathname); S.orgSlug=c? decodeURIComponent(c[1]).toLowerCase() : null; }
+  S.ehrAid=new URLSearchParams(location.search).get('a')||null;
+  const jm=/^\/join(?:\/([^/]*))?\/?$/.exec(location.pathname); S.joinOnly=!!jm; if(jm){ S.join=S.join||{}; if(jm[1] && !S.join.code) S.join.code=decodeURIComponent(jm[1]).toUpperCase(); } S.registerOnly=/^\/register\/?$/.test(location.pathname); const c=/^\/c\/([^/]+)\/?$/.exec(location.pathname); S.orgSlug=c? decodeURIComponent(c[1]).toLowerCase() : null; }
 
 /* ================= boot ================= */
 async function start(){
   readPath();
-  try{ await refresh(); S.auth='ready'; await loadSite(); }
+  try{ await refresh(); S.auth='ready'; await loadSite(); if(S.registerOnly){ S.registerOnly=false; history.replaceState(null,'', S.org?.slug? '/c/'+encodeURIComponent(S.org.slug) : '/'); } if(S.joinOnly){ S.joinOnly=false; history.replaceState(null,'', S.org?.slug? '/c/'+encodeURIComponent(S.org.slug) : '/'); } }
   catch(e){ await loadSite(S.orgSlug);
     if(e.status===401){ try{ const s=await api('GET','/api/setup-status'); S.auth=s.needsSetup?'setup':'login'; }catch(_){ S.auth='login'; } }
     else { S.auth='login'; toast(e.message); }

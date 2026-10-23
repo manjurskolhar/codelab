@@ -27,7 +27,7 @@ function ewContext() {
   if (!aid && role() === 'student') { const m = Object.entries(S.assignments).filter(([, x]) => x.ehr?.chartId === S.ehrOnly); if (m.length === 1) aid = m[0][0]; }
   const a = aid && S.assignments[aid]; return a && a.ehr?.chartId === S.ehrOnly ? { aid, a } : null;
 }
-function ewMode() { const c = ewContext(); if (role() === 'student' && c) return grade(S.me.id, c.aid) ? 'graded' : 'save'; return 'practice'; }
+function ewMode() { const c = ewContext(); if (role() === 'student' && c) { const g = grade(S.me.id, c.aid); return g && !(S.program && !passed(g)) ? 'graded' : 'save'; } return 'practice'; }
 
 /* ---------- storyboard ---------- */
 function ewStory(p) {
