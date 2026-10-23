@@ -1,0 +1,10 @@
+{
+  "name": "codelab-icd10-practicum",
+  "version": "1.0.0",
+  "description": "Self-hosted ICD-10 coding practicum website for Health Information Management programs",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=22.13.0" },
+  "license": "UNLICENSED",
+  "private": true
+}
